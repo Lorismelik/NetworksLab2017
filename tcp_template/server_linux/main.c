@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Initialize socket structure */
-    bzero((char *) &serv_addr, sizeof(serv_addr));
+    bzero((char *) &serv_addr, sizeof (serv_addr));
     portno = 5001;
 
     serv_addr.sin_family = AF_INET;
@@ -32,17 +32,17 @@ int main(int argc, char *argv[]) {
     serv_addr.sin_port = htons(portno);
 
     /* Now bind the host address using bind() call.*/
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0) {
         perror("ERROR on binding");
         exit(1);
     }
 
     /* Now start listening for the clients, here process will
-       * go in sleep mode and will wait for the incoming connection
-    */
+     * go in sleep mode and will wait for the incoming connection
+     */
 
     listen(sockfd, 5);
-    clilen = sizeof(cli_addr);
+    clilen = sizeof (cli_addr);
 
     /* Accept actual connection from the client */
     newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
@@ -71,5 +71,8 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    shutdown(newsockfd, 2);
+    close(newsockfd);
+    
     return 0;
 }
