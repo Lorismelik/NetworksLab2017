@@ -1,43 +1,26 @@
-#include <stdio.h> 
-#include <stdlib.h> 
-#include <winsock2.h> 
-#include <stdint.h> 
-#include <string.h> 
-
-int readn(int sockfd, char *buf, int n){
-    int k;
-    int off = 0;
-    int i;
-    for( i = 0; i < n; ++i){
-        k = recv(sockfd, buf + off, 1, 0);
-        off += 1;
-        if (k < 0){
-            printf("Error. reading from socket \n");
-            exit(1);
-        }
-    }
-    return 0;
-}
+#include <stdio.h>
+#include <stdlib.h>
+#include <winsock2.h>
+#include <stdint.h>
+#include <string.h>
 
 int main(int argc, char *argv[]) {
-
+	
     WSADATA wsaData;
-
-    unsigned int t;
-    t = WSAStartup(MAKEWORD(2,2), &wsaData);
-
-    if (t != 0) {
-        printf("WSAStartup failed: %ui\n", t);
+	
+    unsigned int n;
+    n = WSAStartup(MAKEWORD(2,2), &wsaData);
+	
+    if (n != 0) {
+        printf("WSAStartup failed: %ui\n", n);
         return 1;
     }
-
+    
     int sockfd, newsockfd;
     uint16_t portno;
-    unsigned int clilen;
+    int clilen;
     char buffer[256];
-    char *p = buffer;
     struct sockaddr_in serv_addr, cli_addr;
-    ssize_t n;
 
     /* First call to socket() function */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -71,9 +54,6 @@ int main(int argc, char *argv[]) {
     /* Accept actual connection from the client */
     newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
 
-    shutdown(sockfd, 2);
-    closesocket(sockfd);
-    
     if (newsockfd < 0) {
         perror("ERROR on accept");
         exit(1);
@@ -81,34 +61,37 @@ int main(int argc, char *argv[]) {
 
     /* If connection is established then start communicating */
     memset(buffer, 0, 256);
-    //n = read(newsockfd, buffer, 255); // recv on Windows
-    //
-    // if (n < 0) {
-    //      perror("ERROR reading from socket");
-    //      exit(1);
-    //  }
-    readn(newsockfd, p, 255);
+    n = recv(newsockfd, buffer, 255, 0); // recv on Windows
+
+    /*if (n < 0) {
+        perror("ERROR reading from socket");
+        exit(1);
+    }*/
 
     printf("Here is the message: %s\n", buffer);
 
     /* Write a response to the client */
-    n = send(newsockfd, "I got your message", 18, 0); // send on Windows
+    // n = send(newsockfd, "I got your message", 18, 0); // send on Windows
+    n = send(newsockfd, "I got , ", 6, 0);
+    Sleep(1);
+    n = send(newsockfd, "your message!", 13, 0);
 
-    if (n < 0) {
+    /*if (n < 0) {
         perror("ERROR writing to socket");
         exit(1);
-    }
-
-
-    t = shutdown(newsockfd, SD_BOTH);
+    }*/
+    
+    /* Closing socket */
+    n = shutdown(sockfd, SD_BOTH);
     if (n == SOCKET_ERROR) {
         printf("shutdown failed: %d\n", WSAGetLastError());
         closesocket(sockfd);
         WSACleanup();
         return 1;
     }
-    closesocket(newsockfd);
+    closesocket(sockfd);
     WSACleanup();
+
     return 0;
 }
 
