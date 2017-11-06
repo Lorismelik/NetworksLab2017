@@ -10,7 +10,7 @@
 #define PORT 5001 
 #define BUF_SIZE 1000
 
-void SentErr (char *s) //error handling
+void SentErr (char *s) 
 {
     perror(s);
     exit(1);
@@ -23,25 +23,24 @@ int main( void )
     int s;
     int rc;
     char buf[ BUF_SIZE ];
-    //Fill sockaddr_in
+
     peer.sin_family = AF_INET;
     peer.sin_port = htons( PORT );
     peer.sin_addr.s_addr = inet_addr( SRV_IP );
-    //we set up sockaddr_in
     if (inet_aton(SRV_IP, &peer.sin_addr)==0)
     {
         fprintf(stderr, "inet_aton() failed\n");
         exit (1);
     }
-    //Get socket
+
     s = socket( AF_INET, SOCK_STREAM, 0 );
     if ( s < 0 )
         SentErr("Socket call failed");
-    //Making connection
+
     rc = connect( s, ( struct sockaddr * )&peer, sizeof( peer ) );
     if ( rc )
         SentErr("Connect call failed");
-    //Working with forum
+
     while (1)
     {
         rc = recv( s, buf, BUF_SIZE, 0 );
@@ -52,12 +51,12 @@ int main( void )
             int i=0;
             while (buf[i]!=NULL)
             {
-                if (buf[0]=='^')//If we doing something wrong
+                if (buf[0]=='^')
                 {
                     printf("Invalid choose.Press enter and Try again\n");
                     flag_no_read =1;
                 }
-                if (buf[0]=='#')//If we was disconected
+                if (buf[0]=='#')
                 {
                     printf("Closing connection...\n");
                     return 0;
@@ -67,19 +66,18 @@ int main( void )
             }
              printf("\n____________________\n");
         }
-        if (flag_no_read==0)//If we doing all right
+        if (flag_no_read==0)
         {
             char *text;
             text =(char*) malloc (sizeof(char));
             if (text == NULL)
                  SentErr("Can't malloc");
-            //Getting text from keyboard
             gets(text);
 	    rc = send( s, text, 20, 0 );
 	    if ( rc <= 0 )
                  SentErr("Sent call error");
         }
-        flag_no_read=0;//Changing flag back to "all right" possition
+        flag_no_read=0;
     }
     return 0;
 }
