@@ -42,7 +42,7 @@ struct clients {
     char login[BUF_SIZE];
     int ip;
     int port;
-    int s1; // socket for correctly specify the name
+    int s1;
     bool manager; // if client is manager
 } *users;
 
@@ -55,7 +55,7 @@ int main(void) {
 
     users = (char*) malloc(sizeof (char));
     if (users == NULL) {
-        perror("Neydalos' videlit' pamyat'");
+        perror("Memory error");
         exit(1);
     }
 
@@ -67,40 +67,38 @@ int main(void) {
     local.sin_family = AF_INET;
     local.sin_port = htons(PORT);
     local.sin_addr.s_addr = htonl(INADDR_ANY);
-    //make socket
+
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0)
         SentErrServer("Socket call failed");
-    //attach port
+
     rc = bind(s, (struct sockaddr *) &local, sizeof (local));
     if (rc < 0)
         SentErrServer("Bind call failure");
-    //thread options
+
     pthread_attr_t threadAttr;
     pthread_attr_init(&threadAttr);
     pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
-    //thread for server
+    // Server
     pthread_t server_thread;
     rc = pthread_create(&server_thread, &threadAttr, ServerHandler, (void*) NULL);
-    //listening socket
+
     rc = listen(s, 5);
     if (rc)
         SentErrServer("Listen call failed");
-    SeeTitles(); //Get names of themes
-    //waiting for clients
     while (1) {
         //get connection
         s1 = accept(s, (struct sockaddr *) &si_other, &slen);
 
         if (s1 < 0)
             SentErrServer("Accept call failed");
-        //Making new user struct
+
 
         users[threads + 1].ip = inet_ntoa(si_other.sin_addr);
         users[threads + 1].port = ntohs(si_other.sin_port);
         users[threads + 1].s1 = s1;
         printf("new socket=%d\n", (int) s1);
-        //New thread   
+
         pthread_t client_thread;
 
         rc = pthread_create(&client_thread, &threadAttr, ClientHandler, (void*) s1);
@@ -113,8 +111,7 @@ int main(void) {
 }
 
 void *ServerHandler(void* empty) {
-    char text[40]; //buffer
-    //Getting text from keyboard
+    char text[40]; 
     while (1) {
         gets(text);
         int i = 0;
@@ -127,7 +124,7 @@ void *ServerHandler(void* empty) {
             if (DeleteClient(name) == 0)
                 printf("All right. %s was killed\n", name);
             else
-                printf("Bad comand. Please try again\n");
+                printf("Bad command. Please try again\n");
         }
 
         if (strstr(online_comand, text) != NULL) {
@@ -146,8 +143,8 @@ void SendToClient(int socket, char* message) {
 void *ClientHandler(void* socket) {
     printf("New user login is:\n");
     int rc;
-    char buf[ BUF_SIZE ]; //Buffer
-    char manager[ BUF_SIZE ] = "manager"; //Buffer
+    char buf[ BUF_SIZE ]; 
+    char manager[ BUF_SIZE ] = "manager"; 
     bool is_manager;
     SendToClient((int) socket, "Please type who are you: manager(type *manager* or user *type any name*?:"); //Asking login
     //recive login
@@ -173,12 +170,11 @@ void *ClientHandler(void* socket) {
             pthread_exit(NULL);
         }
     }
-    //saving login
     int j = 0;
     for (j; j <= threads; j++) {
         if (users[j].s1 == (int) socket) {
             if (is_manager == true) {
-                if (manager_count == false)//save manager
+                if (manager_count == false)
                 {
                     users[j].manager == true;
                     manager_count = true;
@@ -215,8 +211,8 @@ zero_menu_send:
                 char out[BUF_SIZE] = "If you want to open lot, type name of the lot\n";
                 char name[BUF_SIZE] = {NULL};
                 strcat(out, themes_names);
-                SendToClient((int) socket, out); //send lot names
-                rc = recv((int) socket, buf, BUF_SIZE, 0); //Reading new point of menu
+                SendToClient((int) socket, out); 
+                rc = recv((int) socket, buf, BUF_SIZE, 0); 
                 if (rc <= 0)
                     SentErrServer("Recv call failed");
                 //If client want to back
@@ -226,7 +222,6 @@ zero_menu_send:
                 }
 
 
-                //reading 
                 {
                     char filename[] = "";
                     strcat(filename, buf);
@@ -235,13 +230,13 @@ zero_menu_send:
                     if (SeeMessages(filename, (int) socket) == 1) {
                         goto zero_menu_send;
                     }
-                    char buf2[ BUF_SIZE ]; //New buffer only for writing message
-                    rc = recv((int) socket, buf2, BUF_SIZE, 0); //Reading new message to write
+                    char buf2[ BUF_SIZE ]; 
+                    rc = recv((int) socket, buf2, BUF_SIZE, 0); 
                     if (rc <= 0)
                         SentErrServer("Recv call failed");
-                    if (buf2[0] == '0') //If client want to back
+                    if (buf2[0] == '0') 
                         goto zero_menu_send;
-                        //If client want to write something
+
                     else {
                         WriteMessages(filename, (int) socket, buf2);
                         goto zero_menu_send;
@@ -301,7 +296,7 @@ zero_menu_send:
                 EndTrade();
 
             }
-            default://if client type illegal point in main menu
+            default:
             {
                 printf("lol");
                 SendErrorToClient((int) socket);
@@ -310,7 +305,7 @@ zero_menu_send:
             }
         }
     }
-    //Disconnect client
+   
     printf("Disconnect client");
     printf("\n");
     threads--;
@@ -328,15 +323,13 @@ int DeleteClient(char name[]) {
     printf("DeleteClient running...\n");
     int number;
     number = FindNumberByName(name);
-    //printf("%d!\n",number);
     if (number != -1) {
         if (users[number].manager == true)
             manager_count = false;
-        //Send signal for client
+
         SendToClient(users[number].s1, "#");
-        //moving cells  
-        //printf("%d,%d\n",number, threads);
-        if (number != threads) //if it's not the last thread
+
+        if (number != threads) 
         {
             users[number] = users[threads];
             memset(&users[threads], NULL, sizeof (users[threads]));
@@ -372,7 +365,6 @@ void WhoIsOnline(int socket) {
     if (socket == -1) {
         char out[BUF_SIZE] = "You want to see online users:\n";
         int i = 0;
-        //Show logins
         for (i; i <= threads; i++) {
             strcat(out, users[i].login);
             strcat(out, " ");
@@ -387,7 +379,6 @@ void WhoIsOnline(int socket) {
             strcat(out, users[i].login);
             strcat(out, " ");
         }
-        //Send logins
         SendToClient(socket, out);
     }
 }
@@ -445,23 +436,21 @@ void WriteMessages(char filename[], int socket, char buf[]) {
     int i = 0;
     int j = 0;
 
-    //printf("%s!\n",buf);
+
     while (buf[i] != NULL) {
         allright = 0;
         j = 0;
         for (j; j <= 9; j++) {
-            //printf ("buf=%c number =%c\n", buf[i], numbers[j]);
+ 
             if (buf[i] == numbers[j]) {
-                //printf("allright=1\n");
                 allright = 1;
             }
         }
 
         if (allright == 0) {
-            //printf("ena=0\n");
             enable = 0;
         }
-        // printf ("%d\n",i);
+
         i++;
     }
 
@@ -547,8 +536,7 @@ void NewLot(char *name, char *price, int socket) {
     fprintf(fp1, "%s\n", name);
     fclose(fp1);
     SeeTitles(); //refresh
-    //write message
-    //For local time
+
     char li[50];
     time_t rawtime;
     struct tm * timeinfo;
@@ -560,7 +548,7 @@ void NewLot(char *name, char *price, int socket) {
     fp2 = fopen(file_name, "w");
     if (fp2 == NULL)
         exit(1);
-    //printf("%s",filename);
+
     fprintf(fp2, "--%s<%s> %s\n", price, FindNameBySocket(socket), li);
     fclose(fp2);
     SendToClient(socket, "All right!\n Hello!\nWhat are you want?\n"
@@ -571,9 +559,6 @@ void NewLot(char *name, char *price, int socket) {
 }
 
 void SendResults() {
-
-
-
     char str[50];
     int i = 0;
     FILE *fp1;
@@ -593,12 +578,8 @@ void SendResults() {
                 str[i - 2] = NULL;
 
                 char* lot_name = str;
-                // strcat(lot_name,line1);
 
                 strcat(str, ".txt");
-
-
-                // printf("filename=%s\n",name);
 
                 size_t len = 0;
                 ssize_t read;
