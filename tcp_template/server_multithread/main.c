@@ -33,9 +33,7 @@ int main(int argc, char *argv[]) {
     int sockfd, newsockfd;
     uint16_t portno;
     unsigned int clilen;
-    char buffer[256];
     struct sockaddr_in serv_addr, cli_addr;
-    ssize_t n;
     
     /* First call to socket() function */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
