@@ -56,7 +56,6 @@ int main(void) {
 
     users = (char*) malloc(sizeof (char));
     if (users == NULL) {
-        perror("Neydalos' videlit' pamyat'");
         EndTrade();
         exit(1);
     }
@@ -292,6 +291,7 @@ void *ClientHandler(void* socket) {
             case '5'://See result
             {
                 if (is_manager == false) {
+                    pick = '0';
                     break;
                 }
                 SendResults();
@@ -596,6 +596,7 @@ void SendResults() {
             i++;
             if (str[i - 1] == ('\n')) {
                 str[i - 1] = NULL;
+                if (str[i - 2] == ('\r'))
                 str[i - 2] = NULL;
 
                 char* lot_name = str;
