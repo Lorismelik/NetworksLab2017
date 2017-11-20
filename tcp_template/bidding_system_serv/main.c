@@ -570,11 +570,6 @@ void NewLot(char *name, char *price, int socket) {
     //printf("%s",filename);
     fprintf(fp2, "--%s<%s> %s\n", price, FindNameBySocket(socket), li);
     fclose(fp2);
-    SendToClient(socket, "All right!\n Hello!\nWhat are you want?\n"
-            "1.See lot titles\n"
-            "2.New lot *only for manager*\n"
-            "3.See online users\n4.Exit\n");
-
 }
 
 void SendResults() {
