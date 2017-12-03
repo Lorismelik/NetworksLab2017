@@ -1,10 +1,9 @@
 //Server trade
 
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <winsock2.h>
 #include <stdio.h>
-#include <pthread.h>
+#include <windows.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h> 
@@ -16,8 +15,8 @@
 #define BUF_SIZE 1000
 #define TITLES "titles.txt"
 
-void *ClientHandler(void* socket); //Client handler
-void *ServerHandler(void* empty); //Server handler
+DWORD WINAPI ClientHandler(void* socket); //Client handler
+DWORD WINAPI ServerHandler(void* empty); //Server handler
 void SendErrorToClient(int socket); // Send error to client
 void SentErrServer(char *s); //error handling
 void NewLot(char *name, char *price, int socket); //make new lot
@@ -34,10 +33,16 @@ void EndTrade();
 int threads = -1; //threads counter
 bool manager_count = false; // if manager online
 char themes_names[BUF_SIZE]; //lot names
-//Comand list
+//Command list
 char kill_command[] = "kill";
 char online_command[] = "online";
 char shutdown_command[] = "shutdown";
+
+DWORD thread_client;
+DWORD thread_server;
+
+HANDLE h_client;
+HANDLE h_server;
 
 struct clients {
     char login[BUF_SIZE];
@@ -52,8 +57,6 @@ int s;
 int main(void) {
 
     // SendResults ("New");
-
-
     users = (char*) malloc(sizeof (char));
     if (users == NULL) {
         EndTrade();
@@ -63,6 +66,15 @@ int main(void) {
     printf("Server trade is working...\n");
     //Initialization
     struct sockaddr_in local, si_other;
+    
+    WSADATA wsaData;
+    ssize_t n;
+    n = WSAStartup(MAKEWORD(2,2), &wsaData);
+    if (n != 0) {
+        printf("WSAStartup failed: %d\n", n);
+        return 1;
+    }
+    
     int s1, rc, slen = sizeof (si_other);
     //fill local
     local.sin_family = AF_INET;
@@ -76,14 +88,12 @@ int main(void) {
     rc = bind(s, (struct sockaddr *) &local, sizeof (local));
     if (rc < 0)
         SentErrServer("Bind call failure");
-    //thread options
-    pthread_attr_t threadAttr;
-    pthread_attr_init(&threadAttr);
-    pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
+
     //thread for server
-    pthread_t server_thread;
-    rc = pthread_create(&server_thread, &threadAttr, ServerHandler, (void*) NULL);
-    //listening socket
+    
+    h_server = CreateThread(
+            NULL, NULL, &ServerHandler, (void*) NULL, NULL, &thread_server);
+    //listening socket  
     rc = listen(s, 5);
     if (rc)
         SentErrServer("Listen call failed");
@@ -102,18 +112,13 @@ int main(void) {
         users[threads + 1].s1 = s1;
         printf("new socket=%d\n", (int) s1);
         //New thread   
-        pthread_t client_thread;
-
-        rc = pthread_create(&client_thread, &threadAttr, ClientHandler, (void*) s1);
-
-        if (rc != 0)
-            SentErrServer("Creating thread false");
+        h_client = CreateThread(NULL, NULL, &ClientHandler, (void*)(&s1), NULL, &thread_client);
         threads++;
     }
     return 0;
 }
 
-void *ServerHandler(void* empty) {
+DWORD WINAPI ServerHandler(CONST LPVOID arg) {
     char text[40]; //buffer
     //Getting text from keyboard
     while (1) {
@@ -145,9 +150,10 @@ void SendToClient(int socket, char* message) {
         perror("send call failed");
 }
 
-void *ClientHandler(void* socket) {
+DWORD WINAPI ClientHandler(CONST LPVOID arg) {
     printf("New user login is:\n");
     int rc;
+    int socket = *(int*)arg;
     char buf[ BUF_SIZE ]; //Buffer
     char manager[ BUF_SIZE ] = "manager"; //Buffer
     bool is_manager;
@@ -172,7 +178,7 @@ void *ClientHandler(void* socket) {
             printf("Client was Deleted. Manager already exist\n");
             SendToClient((int) socket, "#Manager already exist");
             threads--;
-            pthread_exit(NULL);
+            ExitThread(NULL);
         }
     }
     //saving login
@@ -284,7 +290,7 @@ void *ClientHandler(void* socket) {
                     manager_count = false;
                 SendToClient((int) socket, "#");
                 int a = DeleteClient(FindNameBySocket((int) socket));
-                pthread_exit(NULL);
+                ExitThread(NULL);
                 pick = '0';
                 break;
             }
@@ -310,7 +316,7 @@ void *ClientHandler(void* socket) {
     printf("Disconnect client");
     printf("\n");
     threads--;
-    pthread_exit(NULL);
+    ExitThread(NULL);
 }
 
 void SendErrorToClient(int socket) {
@@ -674,5 +680,6 @@ void EndTrade() {
         shutdown(users[i].s1, 2);
         close(users[i].s1);
     }
+    WSACleanup();
 
 }
