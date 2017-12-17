@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 #define SRV_IP "127.0.0.1"
 #define PORT 5001 
@@ -26,7 +27,8 @@ void *SendHandler(void* socket) {
             if (text == NULL)
                  SentErr("Can't malloc");
             //Getting text from keyboard
-            gets(text);
+            bzero(text, BUF_SIZE + 1);
+            fgets(text, BUF_SIZE, stdin);
 	    rc = send( s, text, 20, 0 );
 	    if ( rc <= 0 )
                  SentErr("Sent call error");
@@ -58,7 +60,6 @@ int main( void )
     rc = connect( s, ( struct sockaddr * )&peer, sizeof( peer ) );
     if ( rc )
         SentErr("Connect call failed");
-    
     pthread_attr_t threadAttr;
     pthread_attr_init(&threadAttr);
     pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);

@@ -156,6 +156,16 @@ DWORD WINAPI ClientHandler(CONST LPVOID arg) {
     int socket = *(int*)arg;
     char buf[ BUF_SIZE ]; //Buffer
     char manager[ BUF_SIZE ] = "manager"; //Buffer
+    
+   
+    recv((int) socket, buf, BUF_SIZE, 0);
+    recv((int) socket, buf, BUF_SIZE, 0);
+    recv((int) socket, buf, BUF_SIZE, 0);
+    recv((int) socket, buf, BUF_SIZE, 0);
+    recv((int) socket, buf, BUF_SIZE, 0);
+    recv((int) socket, buf, BUF_SIZE, 0);
+
+    memset(buf, 0, BUF_SIZE);
     bool is_manager;
     SendToClient((int) socket, "Please type who are you: manager(type *manager* or user *type any name*?:"); //Asking login
     //recive login
