@@ -1,5 +1,5 @@
-project(bidding_system_serv)
+project(bidding_system_serv_win)
 cmake_minimum_required(VERSION 2.8)
 aux_source_directory(. SRC_LIST)
 add_executable(${PROJECT_NAME} ${SRC_LIST})
-target_link_libraries(bidding_system_serv wsock32)
+target_link_libraries(bidding_system_serv_win wsock32)
