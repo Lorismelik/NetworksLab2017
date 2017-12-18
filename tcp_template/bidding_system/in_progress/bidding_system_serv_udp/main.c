@@ -1,6 +1,7 @@
 //Server trade
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -20,23 +21,23 @@
 #define COMMAND_COUNT 10
 
 
-void *ClientHandler(void* socket); //Client handler
-void *ServerHandler(void* empty); //Server handler
-void SendErrorToClient(int socket); // Send error to client
+void *ClientHandler(void* arg); //Client handler
+void ServerHandler(); //Server handler
+void SendErrorToClient(struct sockaddr_in cli_addr); // Send error to client
 void SentErrServer(char *s); //error handling
-void NewLot(char name[], char price[], int socket); //make new lot
+void NewLot(char name[], char price[], struct sockaddr_in cli_addr); //make new lot
 int DeleteClient(char name[]); //Delete client
 int FindNumberByName(char* name); //Find number of thread by Name
-char *FindNameBySocket(int socket); //Find name of client by socket
+char *FindNameByIp(struct sockaddr_in cli_addr); //Find name of client by socket
 void WhoIsOnline(char* out); //Make list of online users
 char *SetPrice(int lot, char buf[]); //Set price for lot and make status message
-void SendToClient(int socket, char* message); //Send message to client
+void SendToClient(char* message, struct sockaddr_in cli_addr); //Send message to client
 void SendResults(); //Send results to all users
 void EndTrade(); //Delete all users
 int FindTitle(char title[]);
-void LotDetail(int lot, int socket, char* out);
+void LotDetail(int lot, char* out);
 
-int threads = -1; //threads counter
+int usersCount = -1; //users counter
 int lotCount = -1;
 bool manager_count = false; // if manager online
 
@@ -47,9 +48,7 @@ char shutdown_command[] = "shutdown\n";
 
 struct clients {
     char login[BUF_SIZE];
-    int ip;
-    int port;
-    int s1; // socket for correctly specify the name
+    struct sockaddr_in cli_addr;
     bool manager; // if client is manager
 } *users;
 
@@ -95,8 +94,8 @@ int main(void) {
     printf("Server trade is working...\n");
 
     //Initialization
-    struct sockaddr_in local, si_other;
-    int s1, rc, slen = sizeof (si_other);
+    struct sockaddr_in local;
+    int rc;
 
     //fill local
     local.sin_family = AF_INET;
@@ -104,7 +103,7 @@ int main(void) {
     local.sin_addr.s_addr = htonl(INADDR_ANY);
 
     //make socket
-    servSocket = socket(AF_INET, SOCK_STREAM, 0);
+    servSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if (servSocket < 0)
         SentErrServer("Socket call failed");
 
@@ -120,35 +119,14 @@ int main(void) {
     pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
 
     //thread for server
-    pthread_t server_thread;
-    pthread_create(&server_thread, &threadAttr, ServerHandler, (void*) NULL);
-
-    //listening socket
-    rc = listen(servSocket, 5);
-    if (rc)
-        SentErrServer("Listen call failed");
-
-    while (1) {
-        //get connection
-        s1 = accept(servSocket, (struct sockaddr *) &si_other, &slen);
-        if (s1 < 0)
-            SentErrServer("Accept call failed");
-
-        //Making new user struct
-        users[threads + 1].ip = inet_ntoa(si_other.sin_addr);
-        users[threads + 1].port = ntohs(si_other.sin_port);
-        users[threads + 1].s1 = s1;
-        printf("new socket=%d\n", (int) s1);
-
-        //New thread for client  
-        pthread_t client_thread;
-        pthread_create(&client_thread, &threadAttr, ClientHandler, (void*) s1);
-        threads++;
-    }
+    pthread_t client_thread;
+    pthread_create(&client_thread, &threadAttr, ClientHandler, (void*) NULL);
+    
+    ServerHandler();
     return 0;
 }
 
-void *ServerHandler(void* empty) {
+void ServerHandler() {
     char text[40]; //buffer
     //Getting text from keyboard
     while (1) {
@@ -185,25 +163,24 @@ void *ServerHandler(void* empty) {
     }
 }
 
-void SendToClient(int socket, char* message) {
+void SendToClient(char* message, struct sockaddr_in cli_addr) {
     int rc;
-    rc = send(socket, message, BUF_SIZE, 0);
+    rc = sendto(servSocket, message, BUF_SIZE, 0, (struct sockaddr*) &cli_addr, sizeof(cli_addr));
     if (rc <= 0)
         perror("send call failed");
 }
 
 void *ClientHandler(void* arg) {
 
-    int rc;
-    int socket = (int) arg;
-    
+    int rc;  
     bool isManager = false;
 
     //Working 
     while (1) {
         char buf[ BUF_SIZE ]; //Buffer
         char pick[5] = "";
-        rc = recv(socket, buf, BUF_SIZE, 0);
+        struct sockaddr_in cli_addr;
+        rc = recvfrom (servSocket, buf, BUF_SIZE, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
         if (rc <= 0)
             SentErrServer("Recv call failed");
         int position = 0;
@@ -224,11 +201,12 @@ void *ClientHandler(void* arg) {
         switch (command) {
             case 0 : // new
             {
-                SendToClient(socket, WELCOME);
+                SendToClient(WELCOME, cli_addr);
                 break;
             }
             case 1 : // login
             {
+                usersCount++;
                 int i = position;
                 char name[BUF_SIZE] = "";
                 while ((buf[i] != NULL) && (buf[i] != '\n')) {
@@ -245,38 +223,38 @@ void *ClientHandler(void* arg) {
                 if (isManager == true) {
                     if (manager_count == true) {
                         printf("Client was Deleted. Manager already exist\n");
-                        SendToClient(socket, "#Manager already exist");
-                        threads--;
-                        pthread_exit(NULL);
+                        SendToClient("#Manager already exist", cli_addr);
+                        usersCount--;
                     }
                 }
 
                 //saving login
                 if (isManager) {
-                    users[threads].manager = true;
+                    users[usersCount].manager = true;
                     manager_count = true;
                 }
               
-                strcpy(users[threads].login, name);
-                SendToClient(socket, MAIN_MENU);
-                printf("New user login is: %s\n", users[threads].login);
+                strcpy(users[usersCount].login, name);
+                SendToClient(MAIN_MENU, cli_addr);
+                printf("New user login is: %s\n", users[usersCount].login);
                 printf("\n");
+                users[usersCount].cli_addr = cli_addr;
                 break;
 
             }
             case 2: //Menu
             {
-                SendToClient(socket, MAIN_MENU);
+                SendToClient(MAIN_MENU, cli_addr);
                 break;
             }
             case 3: //See lot titles
             {
                 char out[BUF_SIZE] = LOTS;
                 for (int i = 0; i <= lotCount; i++) {
-                    LotDetail(i, socket, out);
+                    LotDetail(i, out);
                     strncat(out, "\n", 1);
                 }
-                SendToClient(socket, out); //send lot names
+                SendToClient(out, cli_addr); //send lot names
                 break;
                 
             }                 
@@ -300,12 +278,12 @@ void *ClientHandler(void* arg) {
                 }
                 int lot = FindTitle(name);
                 if (lot == -1) {
-                    SendToClient(socket, "No lot with this name \n");
-                    SendToClient(socket, MAIN_MENU);
+                    SendToClient("No lot with this name \n", cli_addr);
+                    SendToClient(MAIN_MENU, cli_addr);
                     break;
                 }
-                SendToClient(socket, SetPrice(lot, price));
-                SendToClient(socket, MAIN_MENU);
+                SendToClient(SetPrice(lot, price), cli_addr);
+                SendToClient(MAIN_MENU, cli_addr);
                 break;
             }
             case 5://New lot
@@ -314,7 +292,7 @@ void *ClientHandler(void* arg) {
                     break;
                 }
 
-                SendToClient(socket, NEW_LOT);
+                SendToClient(NEW_LOT, cli_addr);
                 break;
             }
             case 6:
@@ -336,28 +314,25 @@ void *ClientHandler(void* arg) {
                     j++;
                 }
                 
-                NewLot(name, price, socket);
-                SendToClient(socket, SUCCESS);
-                SendToClient(socket, MAIN_MENU);
+                NewLot(name, price, cli_addr);
+                SendToClient(SUCCESS, cli_addr);
+                SendToClient(MAIN_MENU, cli_addr);
                 break; 
             }
             case 7://see online users
             {
                 char out[BUF_SIZE] = " ";
                 WhoIsOnline(out);
-                SendToClient(socket, out);
-                SendToClient(socket, MAIN_MENU);
+                SendToClient(out, cli_addr);
+                SendToClient(MAIN_MENU, cli_addr);
                 break;
             }
             case 8://Disconnect client
             {
-                printf("%d\n", socket);
                 if (isManager == true)
                     manager_count = false;
-                SendToClient((int) socket, "#");
-                DeleteClient(FindNameBySocket(socket));
-                pthread_exit(NULL);
-                break;
+                SendToClient("#", cli_addr);
+                DeleteClient(FindNameByIp(cli_addr));
             }
             case 9://See result
             {
@@ -369,19 +344,14 @@ void *ClientHandler(void* arg) {
             }
             default://if client type illegal point in main menu
             {
-                SendErrorToClient(socket);
+                SendErrorToClient(cli_addr);
             }
         }
         memset(buf, 0, BUF_SIZE);
     }
-    //Disconnect client
-    printf("Disconnect client");
-    printf("\n");
-    threads--;
-    pthread_exit(NULL);
 }
 
-void LotDetail(int lot, int socket, char* out) {
+void LotDetail(int lot, char* out) {
 
     strncat(out, lots[lot].lotName, strlen(lots[lot].lotName));
     strncat(out, " ", 1);
@@ -394,15 +364,15 @@ void LotDetail(int lot, int socket, char* out) {
 }
 
 int FindTitle(char title[]) {
-    for (int i = 0; i <= threads; i++)
+    for (int i = 0; i <= usersCount; i++)
         if (!strcmp(lots[i].lotName, title))
             return i;
     return -1;
 }
 
-void SendErrorToClient(int socket) {
+void SendErrorToClient(struct sockaddr_in cli_addr) {
     int rc = 0;
-    rc = send((int) socket, "^", 1000, 0);
+    rc = sendto(servSocket, "^", BUF_SIZE, 0, (struct sockaddr*) &cli_addr, sizeof(cli_addr));
     if (rc <= 0)
         perror("send call failed");
 }
@@ -415,13 +385,13 @@ int DeleteClient(char name[]) {
         if (users[number].manager == true)
             manager_count = false;
 
-        SendToClient(users[number].s1, "#");
+        SendToClient("#",users[number].cli_addr);
         printf("The client %s was deleted \n", users[number].login);
-        if (number != threads) {
-            users[number] = users[threads];
-            memset(&users[threads], NULL, sizeof (users[threads]));
+        if (number != usersCount) {
+            users[number] = users[usersCount];
+            memset(&users[usersCount], NULL, sizeof (users[usersCount]));
         }
-        threads--;
+        usersCount--;
 
         return 0;
     }
@@ -430,7 +400,7 @@ int DeleteClient(char name[]) {
 
 int FindNumberByName(char* name) {
 
-    for (int j = 0; j <= threads; j++) {
+    for (int j = 0; j <= usersCount; j++) {
         if (!strcmp(users[j].login, name))
             return j;
     }
@@ -438,9 +408,9 @@ int FindNumberByName(char* name) {
 }
 
 void WhoIsOnline(char* out) {
-    strncat(out, "You want to see online users:\n", 30);
+    strncat(out, "You want to see online users:\n", strlen("You want to see online users:\n"));
     //Show logins
-    for (int i = 0; i <= threads; i++) {
+    for (int i = 0; i <= usersCount; i++) {
         strncat(out, users[i].login, strlen(users[i].login));
         strncat(out, " ", 1);
     }
@@ -462,9 +432,9 @@ char *SetPrice(int lot, char buf[]) {
 
 }
 
-char *FindNameBySocket(int socket) {
-    for (int i = 0; i <= threads; i++) {
-        if (users[i].s1 == socket)
+char *FindNameByIp(struct sockaddr_in cli_addr) {
+    for (int i = 0; i <= usersCount; i++) {
+        if (users[i].cli_addr.sin_addr.s_addr == cli_addr.sin_addr.s_addr)
             return users[i].login;
     }
     return "error";
@@ -477,22 +447,22 @@ void SentErrServer(char *s) //error handling
     exit(1);
 }
 
-void NewLot(char name[], char price[], int socket) {
+void NewLot(char name[], char price[], struct sockaddr_in cli_addr) {
     int newPrice = -1;
     newPrice = atoi(price);
     if (newPrice <= 0 || strlen(name) <= 0) {
-        SendToClient(socket, "Invalid data \n");
+        SendToClient("Invalid data \n", cli_addr);
         return;
     }
     strcpy(lots[lotCount + 1].lotName, name);
     lots[lotCount + 1].price = newPrice;
-    strcpy(lots[lotCount + 1].winner, FindNameBySocket(socket));
+    strcpy(lots[lotCount + 1].winner, FindNameByIp(cli_addr));
     lotCount++;
 }
 
 void SendResults() {
 
-    for (int i = 0; i <= threads; i++) {
+    for (int i = 0; i <= usersCount; i++) {
         char result[BUF_SIZE] = "";
         for (int j = 0; j <= lotCount; j++) {
             if (!strcmp(lots[j].winner, users[i].login)) {
@@ -520,16 +490,11 @@ void SendResults() {
                 strcat(result, out_loser);
             }
         }
-        SendToClient((int) users[i].s1, result);
+        SendToClient(result, users[i].cli_addr);
     }
 }
 
 void EndTrade() {
-    for (int i = 0; i <= threads; i++) {
-        shutdown(users[i].s1, 2);
-        close(users[i].s1);
-    }
     close(servSocket);
-
+    exit(1);
 }
-

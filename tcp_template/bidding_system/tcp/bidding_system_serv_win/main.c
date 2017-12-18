@@ -1,17 +1,23 @@
 //Server trade
 
 #include <sys/types.h>
-#include <winsock2.h>
 #include <stdio.h>
-#include <windows.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h> 
 #include <time.h> 
 #include <stdbool.h>
+#include <string.h>
+#include <winsock2.h>
+#include <windows.h>
 
 #define PORT 5001 
 #define BUF_SIZE 1000
+#define MAIN_MENU "Hello!\nWhat do you want?\n 1.See lot titles\n 2.New lot *only for manager*\n 3.See online users\n 4.Exit\n 5.End *only for manager*"
+#define WELCOME "Please type who are you: (login your_login)"
+#define LOTS "If you want to make a bet enter new bet, which will be higher than older ('bet lot_name lot_price')\n"
+#define NEW_LOT "Please write name and price of the new lot ('lot lot_name lot_price')\n"
+#define SUCCESS "The new lot has created!\n"
+#define COMMAND_COUNT 10
 
 
 DWORD WINAPI *ClientHandler(void* socket); //Client handler
@@ -28,7 +34,7 @@ void SendToClient(int socket, char* message); //Send message to client
 void SendResults(); //Send results to all users
 void EndTrade(); //Delete all users
 int FindTitle(char title[]);
-void SendLotDetail(int lot, int socket);
+void LotDetail(int lot, int socket, char* out);
 
 int threads = -1; //threads counter
 int lotCount = -1;
@@ -50,14 +56,26 @@ struct clients {
 DWORD thread_client;
 DWORD thread_server;
 
-HANDLE h_client;
-HANDLE h_server;
-
 struct lot {
     char lotName[BUF_SIZE];
     int price;
     char winner[BUF_SIZE];
 } *lots;
+
+static char *commands[] = {
+    "new",
+    "login",
+    "0",
+    "1",
+    "bet",
+    "2",
+    "lot",
+    "3",
+    "4",
+    "5"
+};
+
+
 
 int servSocket;
 
@@ -82,6 +100,7 @@ int main(void) {
     //Initialization
     struct sockaddr_in local, si_other;
     
+    
     WSADATA wsaData;
     ssize_t n;
     n = WSAStartup(MAKEWORD(2,2), &wsaData);
@@ -89,10 +108,9 @@ int main(void) {
         printf("WSAStartup failed: %d\n", n);
         return 1;
     }
-    
-    
-    int s1, rc, slen = sizeof (si_other);
 
+    int s1, rc, slen = sizeof (si_other);
+    
     //fill local
     local.sin_family = AF_INET;
     local.sin_port = htons(PORT);
@@ -107,6 +125,7 @@ int main(void) {
     rc = bind(servSocket, (struct sockaddr *) &local, sizeof (local));
     if (rc < 0)
         SentErrServer("Bind call failure");
+
 
 
     h_server = CreateThread(NULL, NULL, &ServerHandler, (void*) NULL, NULL, &thread_server);
@@ -128,7 +147,6 @@ int main(void) {
         users[threads + 1].s1 = s1;
         printf("new socket=%d\n", (int) s1);
 
-        //New thread for client  
         h_client = CreateThread(NULL, NULL, &ClientHandler, (void*)(&s1), NULL, &thread_client);
         threads++;
     }
@@ -139,16 +157,17 @@ DWORD WINAPI *ServerHandler(CONST LPVOID arg) {
     char text[40]; //buffer
     //Getting text from keyboard
     while (1) {
-        
+
+        bzero(text, BUF_SIZE + 1);
         fgets(text, BUF_SIZE, stdin);
-        
+
         char buf[4];
         strncat(buf, text, 4);
         if (!strcmp(kill_command, buf)) {
             char name[] = "";
             int i = 5;
-            while(text[i]!=NULL) {
-                name[i]=text[i];
+            while ((text[i] != NULL) && (text[i] != '\n')) {
+                name[i] = text[i];
                 i++;
             }
             if (!DeleteClient(name))
@@ -179,136 +198,163 @@ void SendToClient(int socket, char* message) {
 }
 
 DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
-    printf("New user login is:\n");
+
     int rc;
     int socket = *(int*)arg;
-    char buf[ BUF_SIZE ]; //Buffer
-    bool isManager = false;
-    SendToClient(socket, "Please type who are you: (type *manager* or user *type any name*?:"); //Asking login
-    //recieve login
-    rc = recv(socket, buf, BUF_SIZE, 0);
-    if (rc <= 0)
-        SentErrServer("Recv call failed");
-
-    //check for manager
-    if (!strcmp(buf, "manager")) {
-        isManager = true;
-    }
-
-    //delete if manager already exist  
-    if (isManager == true) {
-        if (manager_count == true) {
-            printf("Client was Deleted. Manager already exist\n");
-            SendToClient(socket, "#Manager already exist");
-            threads--;
-            ExitThread(NULL);
-        }
-    }
-
-    //saving login
-        if (isManager) {
-            users[threads].manager = true;
-            manager_count = true;
-        }
-        int i = 0;
-        while (buf[i] != NULL) {
-            users[threads].login[i] = buf[i];
-            i++;
-        }
-        printf("%s\n", users[threads].login);
-        memset(buf, 0, BUF_SIZE);
     
+    bool isManager = false;
 
-    printf("\n");
     //Working 
-    char pick = '0';
     while (1) {
-        switch (pick) {
-            case '0':
+        char buf[ BUF_SIZE ]; //Buffer
+        char pick[5] = "";
+        rc = recv(socket, buf, BUF_SIZE, 0);
+        if (rc <= 0)
+            SentErrServer("Recv call failed");
+        int position = 0;
+        while ((buf[position] != ' ') && (buf[position] != '\n') && (buf[position] != NULL) && (position != 5))
+        {
+            pick[position] = buf[position];
+            position++;
+        }
+        int command = 0;
+        while (command <= COMMAND_COUNT)
+        {
+            if (!strcmp(commands[command], pick))
+                break;
+            command++;
+        }
+       
+        position++; // to step over 
+        switch (command) {
+            case 0 : // new
             {
-                SendToClient(socket, "Hello!\nWhat do you want?\n"
-                        "1.See lot titles\n"
-                        "2.New lot *only for manager*\n"
-                        "3.See online users\n4.Exit\n5.End *only for manager*");
-                rc = recv((int) socket, buf, BUF_SIZE, 0);
-                if (rc <= 0)
-                    SentErrServer("Recv call failed when pick was 0");
-                pick = buf[0];
+                SendToClient(socket, WELCOME);
                 break;
             }
-            case '1'://See lot titles
+            case 1 : // login
             {
-                memset(buf, 0, BUF_SIZE);
-                char out[BUF_SIZE] = "If you want to open lot, type name of the lot\n";
+                int i = position;
+                char name[BUF_SIZE] = "";
+                while ((buf[i] != NULL) && (buf[i] != '\n')) {
+                    name[i-position]=buf[i];
+                    i++;
+                }
+                
+                //check for manager
+                if (!strcmp(name, "manager")) {
+                    isManager = true;
+                }
+
+                //delete if manager already exist  
+                if (isManager == true) {
+                    if (manager_count == true) {
+                        printf("Client was Deleted. Manager already exist\n");
+                        SendToClient(socket, "#Manager already exist");
+                        threads--;
+                        ExitThread(NULL);
+                    }
+                }
+
+                //saving login
+                if (isManager) {
+                    users[threads].manager = true;
+                    manager_count = true;
+                }
+              
+                strcpy(users[threads].login, name);
+                SendToClient(socket, MAIN_MENU);
+                printf("New user login is: %s\n", users[threads].login);
+                printf("\n");
+                break;
+
+            }
+            case 2: //Menu
+            {
+                SendToClient(socket, MAIN_MENU);
+                break;
+            }
+            case 3: //See lot titles
+            {
+                char out[BUF_SIZE] = LOTS;
                 for (int i = 0; i <= lotCount; i++) {
-                    strncat(out, lots[i].lotName, strlen(lots[i].lotName));
+                    LotDetail(i, socket, out);
                     strncat(out, "\n", 1);
                 }
                 SendToClient(socket, out); //send lot names
-                rc = recv((int) socket, buf, BUF_SIZE, 0); //Reading new point of menu
-                if (rc <= 0)
-                    SentErrServer("Recv call failed");
-                //If client want to back
-                if (buf[0] == '0') {
-                    pick = '0';
-                    break;
-                }
-
-                int lot = FindTitle(buf);
-                if (lot == -1) {
-                    pick = '0';
-                    break;
-                }
-
-                SendLotDetail(lot, socket);
-
-                memset(buf, 0, BUF_SIZE);
-                rc = recv(socket, buf, BUF_SIZE, 0); //Reading new message to write
-                if (rc <= 0)
-                    SentErrServer("Recv call failed");
-                if ((buf[0] == '0') && (strlen(buf) == 1)) { //If client want to back
-                    pick = '0';
-                    break;
-                } else {
-                    SendToClient(socket, SetPrice(lot, buf));
-                    pick = '0';
-                    break;
-                }
-            }
-            case '2'://New lot
-            {
-                memset(buf, 0, BUF_SIZE);
-                char name[ BUF_SIZE ];
-                char price[ BUF_SIZE ];
-
-                if (isManager == false) {
-                    pick = '0';
-                    break;
-                }
-
-                SendToClient(socket, "Please write name of the lot\n");
-                rc = recv((int) socket, name, BUF_SIZE, 0);
-                if (rc <= 0)
-                    SentErrServer("Recv call failed");
-
-                SendToClient(socket, "Please write price of the lot\n");
-                rc = recv((int) socket, price, BUF_SIZE, 0);
-                if (rc <= 0)
-                    SentErrServer("Recv call failed");
-                NewLot(name, price, (int) socket);
-                pick = '0';
                 break;
-
+                
+            }                 
+            case 4: // bet lot_name lot_price
+            {
+                int i = position;
+                char name[BUF_SIZE] = "";
+                char price[BUF_SIZE] = "";
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
+                {
+                    name[i-position] = buf[i]; 
+                    i++;
+                }
+                i++;
+                int j = 0;
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
+                {
+                    price[j] = buf[i]; 
+                    i++;
+                    j++;
+                }
+                int lot = FindTitle(name);
+                if (lot == -1) {
+                    SendToClient(socket, "No lot with this name \n");
+                    SendToClient(socket, MAIN_MENU);
+                    break;
+                }
+                SendToClient(socket, SetPrice(lot, price));
+                SendToClient(socket, MAIN_MENU);
+                break;
             }
-            case '3'://see online users
+            case 5://New lot
+            {
+                if (isManager == false) {
+                    break;
+                }
+
+                SendToClient(socket, NEW_LOT);
+                break;
+            }
+            case 6:
+            {
+                int i = position;
+                char name[BUF_SIZE] = "";
+                char price[BUF_SIZE] = "";
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
+                {
+                    name[i-position] = buf[i]; 
+                    i++;
+                }
+                i++;
+                int j = 0;
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
+                {
+                    price[j] = buf[i]; 
+                    i++;
+                    j++;
+                }
+                
+                NewLot(name, price, socket);
+                SendToClient(socket, SUCCESS);
+                SendToClient(socket, MAIN_MENU);
+                break; 
+            }
+            case 7://see online users
             {
                 char out[BUF_SIZE] = " ";
                 WhoIsOnline(out);
                 SendToClient(socket, out);
-                pick = '0';
+                SendToClient(socket, MAIN_MENU);
                 break;
             }
-            case '4'://Disconnect client
+            case 8://Disconnect client
             {
                 printf("%d\n", socket);
                 if (isManager == true)
@@ -316,23 +362,19 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
                 SendToClient((int) socket, "#");
                 DeleteClient(FindNameBySocket(socket));
                 ExitThread(NULL);
-                pick = '0';
                 break;
             }
-            case '5'://See result
+            case 9://See result
             {
                 if (isManager == false) {
-                    pick = '0';
                     break;
                 }
                 SendResults();
                 EndTrade();
-
             }
             default://if client type illegal point in main menu
             {
-                SendErrorToClient((int) socket);
-                pick = '0';
+                SendErrorToClient(socket);
             }
         }
         memset(buf, 0, BUF_SIZE);
@@ -344,19 +386,16 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
     ExitThread(NULL);
 }
 
-void SendLotDetail(int lot, int socket) {
-    
-    char message[BUF_SIZE] = "";   
-    strncat(message, lots[lot].lotName, strlen(lots[lot].lotName));
-    strncat(message, " ", 1);
+void LotDetail(int lot, int socket, char* out) {
+
+    strncat(out, lots[lot].lotName, strlen(lots[lot].lotName));
+    strncat(out, " ", 1);
     char priceBuf[BUF_SIZE] = "";
     sprintf(priceBuf, "%d", lots[lot].price);
-    strncat(message, priceBuf, strlen(priceBuf));
-    strncat(message, " ", 1);
-    strncat(message, lots[lot].winner, strlen(lots[lot].winner));
-    strncat(message, "\n", 1);
-    strncat(message, "Enter new bet if you want this lot \n", 36);
-    SendToClient(socket, message);
+    strncat(out, priceBuf, strlen(priceBuf));
+    strncat(out, " ", 1);
+    strncat(out, lots[lot].winner, strlen(lots[lot].winner));
+    strncat(out, "\n", 1);
 }
 
 int FindTitle(char title[]) {
@@ -395,7 +434,7 @@ int DeleteClient(char name[]) {
 }
 
 int FindNumberByName(char* name) {
-    
+
     for (int j = 0; j <= threads; j++) {
         if (!strcmp(users[j].login, name))
             return j;
@@ -403,13 +442,13 @@ int FindNumberByName(char* name) {
     return -1;
 }
 
-void WhoIsOnline(char* out) { 
-        strncat(out,"You want to see online users:\n", 30);
-        //Show logins
-        for (int i = 0; i <= threads; i++) {
-            strncat(out, users[i].login, strlen(users[i].login));
-            strncat(out, " ", 1);
-        }
+void WhoIsOnline(char* out) {
+    strncat(out, "You want to see online users:\n", 30);
+    //Show logins
+    for (int i = 0; i <= threads; i++) {
+        strncat(out, users[i].login, strlen(users[i].login));
+        strncat(out, " ", 1);
+    }
 }
 
 char *SetPrice(int lot, char buf[]) {
@@ -447,7 +486,7 @@ void NewLot(char name[], char price[], int socket) {
     int newPrice = -1;
     newPrice = atoi(price);
     if (newPrice <= 0 || strlen(name) <= 0) {
-        SendErrorToClient(socket);
+        SendToClient(socket, "Invalid data \n");
         return;
     }
     strcpy(lots[lotCount + 1].lotName, name);
@@ -490,12 +529,13 @@ void SendResults() {
     }
 }
 
-void EndTrade() {   
+void EndTrade() {
     for (int i = 0; i <= threads; i++) {
         shutdown(users[i].s1, 2);
         close(users[i].s1);
     }
     close(servSocket);
     WSACleanup();
+    exit(0);
 
 }

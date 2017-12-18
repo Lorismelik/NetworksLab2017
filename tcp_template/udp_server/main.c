@@ -1,18 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <netdb.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <unistd.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <string.h>
+#include <netdb.h>
 
 int main(int argc, char *argv[]) {
     int sockfd, newsockfd;
     uint16_t portno;
     unsigned int clilen;
     char buffer[256];
+    char *p = buffer;
     struct sockaddr_in serv_addr, cli_addr;
     ssize_t n;
 
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Initialize socket structure */
-    bzero((char *) &serv_addr, sizeof (serv_addr));
+    bzero((char *) &serv_addr, sizeof(serv_addr));
     portno = 5001;
 
     serv_addr.sin_family = AF_INET;
@@ -33,21 +33,25 @@ int main(int argc, char *argv[]) {
     serv_addr.sin_port = htons(portno);
 
     /* Now bind the host address using bind() call.*/
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof (serv_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
         perror("ERROR on binding");
         exit(1);
     }
 
-    int recsize = recvfrom (sockfd, buffer, 255, 0, (struct sockaddr *)&cli_addr, &clilen);
-    if (recsize < 0) {
-    	perror("ERR");
+    int rec = recvfrom(sockfd, &buffer[0], 255, 0, (struct sockaddr *)&cli_addr, &clilen);
+    if (rec < 0) {
+    	perror("ERROR");
     	exit(1);
     }
-    printf( "recsize: %d\n ", recsize );
-    sleep( 1 );
-    printf( "datagram: %s\n", buffer );
-    
-    close(sockfd);
-    
+
+    struct hostent *hst;
+        hst = gethostbyaddr((char *)&cli_addr.sin_addr, 4, AF_INET);
+        printf("+%s [%s:%d] new DATAGRAM!\n", (hst) ? hst->h_name : "Unknown host", inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port));
+
+        printf("C=>S:%s\n", &buffer[0]);
+ 
+        sendto(sockfd, &buffer[0], 256, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+        close(sockfd);
+
     return 0;
 }
