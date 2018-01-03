@@ -26,7 +26,7 @@ void *SendHandler(void* socket) {
     while (1) {
         char text[BUF_SIZE] = "";
         fgets(text, BUF_SIZE, stdin);
-        rc = send(s, text, 20, 0);
+        rc = send(s, text, strlen(text), 0);
         if (rc <= 0)
             SentErr("Sent call error");
     }

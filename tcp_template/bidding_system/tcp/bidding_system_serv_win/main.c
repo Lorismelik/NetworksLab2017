@@ -1,35 +1,36 @@
 //Server trade
 
 #include <sys/types.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h> 
 #include <time.h> 
 #include <stdbool.h>
 #include <string.h>
-#include <winsock2.h>
-#include <windows.h>
 
 #define PORT 5001 
 #define BUF_SIZE 1000
-#define MAIN_MENU "Hello!\nWhat do you want?\n 1.See lot titles\n 2.New lot *only for manager*\n 3.See online users\n 4.Exit\n 5.End *only for manager*"
-#define WELCOME "Please type who are you: (login your_login)"
+#define MAIN_MENU "Hello!\nWhat do you want?\n 1.See lot titles\n 2.New lot *only for manager*\n 3.See online users\n 4.Exit\n 5.End *only for manager* \n"
+#define WELCOME "Please type who are you: (login your_login) \n"
 #define LOTS "If you want to make a bet enter new bet, which will be higher than older ('bet lot_name lot_price')\n"
 #define NEW_LOT "Please write name and price of the new lot ('lot lot_name lot_price')\n"
 #define SUCCESS "The new lot has created!\n"
+#define DENIED "You are not a manager\n"
+#define NOTLOGIN "You must login before make this action\n"
 #define COMMAND_COUNT 10
 
 
 DWORD WINAPI *ClientHandler(void* socket); //Client handler
 DWORD WINAPI *ServerHandler(void* empty); //Server handler
 void SendErrorToClient(int socket); // Send error to client
-void SentErrServer(char *s); //error handling
+void SentErrServer(char *s, int socket); //error handling
 void NewLot(char name[], char price[], int socket); //make new lot
 int DeleteClient(char name[]); //Delete client
 int FindNumberByName(char* name); //Find number of thread by Name
 char *FindNameBySocket(int socket); //Find name of client by socket
 void WhoIsOnline(char* out); //Make list of online users
-char *SetPrice(int lot, char buf[]); //Set price for lot and make status message
+char *SetPrice(int lot, char buf[], int socket); //Set price for lot and make status message
 void SendToClient(int socket, char* message); //Send message to client
 void SendResults(); //Send results to all users
 void EndTrade(); //Delete all users
@@ -42,8 +43,14 @@ bool manager_count = false; // if manager online
 
 //Command list
 char kill_command[] = "kill";
-char online_command[] = "online\n";
-char shutdown_command[] = "shutdown\n";
+char online_command[] = "online";
+char shutdown_command[] = "shutdown";
+
+DWORD thread_client;
+DWORD thread_server;
+
+HANDLE h_client;
+HANDLE h_server;
 
 struct clients {
     char login[BUF_SIZE];
@@ -52,9 +59,6 @@ struct clients {
     int s1; // socket for correctly specify the name
     bool manager; // if client is manager
 } *users;
-
-DWORD thread_client;
-DWORD thread_server;
 
 struct lot {
     char lotName[BUF_SIZE];
@@ -79,16 +83,31 @@ static char *commands[] = {
 
 int servSocket;
 
+
+void readn(int sk, char* buf) {
+    char symb[1];
+    for (int i = 0; ; i++) {
+        if (recv(sk, symb, 1, 0) < 0) {
+            perror("ERROR reading from socket");
+            exit(1);
+        }
+        if (symb[0] == 10){
+            break;
+        }
+        buf[i] = symb[0];
+    }
+}
+
 int main(void) {
 
-    users = (char*) malloc(sizeof (char));
+    users = (char*) malloc(BUF_SIZE*10);
     if (users == NULL) {
         printf("Cant create struct for users");
         EndTrade();
         exit(1);
     }
 
-    lots = (char*) malloc(sizeof (char));
+    lots = (char*) malloc(BUF_SIZE*10);
     if (lots == NULL) {
         printf("Cant create struct for lots");
         EndTrade();
@@ -99,8 +118,8 @@ int main(void) {
 
     //Initialization
     struct sockaddr_in local, si_other;
-    
-    
+    int s1, rc, slen = sizeof (si_other);
+	
     WSADATA wsaData;
     ssize_t n;
     n = WSAStartup(MAKEWORD(2,2), &wsaData);
@@ -108,9 +127,7 @@ int main(void) {
         printf("WSAStartup failed: %d\n", n);
         return 1;
     }
-
-    int s1, rc, slen = sizeof (si_other);
-    
+	
     //fill local
     local.sin_family = AF_INET;
     local.sin_port = htons(PORT);
@@ -119,12 +136,12 @@ int main(void) {
     //make socket
     servSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (servSocket < 0)
-        SentErrServer("Socket call failed");
+        printf("Socket call failed");
 
     //attach port
     rc = bind(servSocket, (struct sockaddr *) &local, sizeof (local));
     if (rc < 0)
-        SentErrServer("Bind call failure");
+        printf("Bind call failure");
 
 
 
@@ -133,13 +150,13 @@ int main(void) {
     //listening socket
     rc = listen(servSocket, 5);
     if (rc)
-        SentErrServer("Listen call failed");
+        printf("Listen call failed");
 
     while (1) {
         //get connection
         s1 = accept(servSocket, (struct sockaddr *) &si_other, &slen);
         if (s1 < 0)
-            SentErrServer("Accept call failed");
+            printf("Accept call failed");
 
         //Making new user struct
         users[threads + 1].ip = inet_ntoa(si_other.sin_addr);
@@ -147,14 +164,15 @@ int main(void) {
         users[threads + 1].s1 = s1;
         printf("new socket=%d\n", (int) s1);
 
-        h_client = CreateThread(NULL, NULL, &ClientHandler, (void*)(&s1), NULL, &thread_client);
+        //New thread for client  
+		h_client = CreateThread(NULL, NULL, &ClientHandler, (void*)(&s1), NULL, &thread_client);
         threads++;
     }
     return 0;
 }
 
 DWORD WINAPI *ServerHandler(CONST LPVOID arg) {
-    char text[40]; //buffer
+    char text[BUF_SIZE]; //buffer
     //Getting text from keyboard
     while (1) {
 
@@ -190,27 +208,25 @@ DWORD WINAPI *ServerHandler(CONST LPVOID arg) {
     }
 }
 
-void SendToClient(int socket, char* message) {
+DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
     int rc;
     rc = send(socket, message, BUF_SIZE, 0);
     if (rc <= 0)
         perror("send call failed");
 }
 
-DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
+void *ClientHandler(void* arg) {
 
     int rc;
     int socket = *(int*)arg;
-    
+    bool isLogin = false;
     bool isManager = false;
 
     //Working 
     while (1) {
         char buf[ BUF_SIZE ]; //Buffer
         char pick[5] = "";
-        rc = recv(socket, buf, BUF_SIZE, 0);
-        if (rc <= 0)
-            SentErrServer("Recv call failed");
+        readn(socket, buf);
         int position = 0;
         while ((buf[position] != ' ') && (buf[position] != '\n') && (buf[position] != NULL) && (position != 5))
         {
@@ -247,13 +263,11 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
                 }
 
                 //delete if manager already exist  
-                if (isManager == true) {
-                    if (manager_count == true) {
+                if (isManager && manager_count) {
                         printf("Client was Deleted. Manager already exist\n");
-                        SendToClient(socket, "#Manager already exist");
+                        SendToClient(socket, "#Manager already exist\n");
                         threads--;
                         ExitThread(NULL);
-                    }
                 }
 
                 //saving login
@@ -261,8 +275,8 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
                     users[threads].manager = true;
                     manager_count = true;
                 }
-              
-                strcpy(users[threads].login, name);
+                isLogin = true;
+                strncpy(users[threads].login, name, strlen(name));
                 SendToClient(socket, MAIN_MENU);
                 printf("New user login is: %s\n", users[threads].login);
                 printf("\n");
@@ -276,9 +290,21 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }
             case 3: //See lot titles
             {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
                 char out[BUF_SIZE] = LOTS;
                 for (int i = 0; i <= lotCount; i++) {
                     LotDetail(i, socket, out);
+                }
+                if (lotCount<0) {
+                    char* emptyMessage = "Empty set\n";
+                    strncat(out, emptyMessage, strlen(emptyMessage));
+                }
+                else
+                {
                     strncat(out, "\n", 1);
                 }
                 SendToClient(socket, out); //send lot names
@@ -287,6 +313,11 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }                 
             case 4: // bet lot_name lot_price
             {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
                 int i = position;
                 char name[BUF_SIZE] = "";
                 char price[BUF_SIZE] = "";
@@ -309,13 +340,19 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
                     SendToClient(socket, MAIN_MENU);
                     break;
                 }
-                SendToClient(socket, SetPrice(lot, price));
+                SendToClient(socket, SetPrice(lot, price, socket));
                 SendToClient(socket, MAIN_MENU);
                 break;
             }
             case 5://New lot
             {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
                 if (isManager == false) {
+                    SendToClient(socket, DENIED);
                     break;
                 }
 
@@ -324,6 +361,15 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }
             case 6:
             {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
+                if (isManager == false) {
+                    SendToClient(socket, DENIED);
+                    break;
+                }
                 int i = position;
                 char name[BUF_SIZE] = "";
                 char price[BUF_SIZE] = "";
@@ -348,6 +394,12 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }
             case 7://see online users
             {
+                
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
                 char out[BUF_SIZE] = " ";
                 WhoIsOnline(out);
                 SendToClient(socket, out);
@@ -356,8 +408,13 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }
             case 8://Disconnect client
             {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
                 printf("%d\n", socket);
-                if (isManager == true)
+                if (isManager)
                     manager_count = false;
                 SendToClient((int) socket, "#");
                 DeleteClient(FindNameBySocket(socket));
@@ -366,24 +423,27 @@ DWORD WINAPI *ClientHandler(CONST LPVOID arg) {
             }
             case 9://See result
             {
-                if (isManager == false) {
+                if (!isLogin)
+                {
+                    SendToClient(socket, NOTLOGIN);
+                    break;
+                }
+                if (!isManager) {
+                    SendToClient(socket, DENIED);
                     break;
                 }
                 SendResults();
                 EndTrade();
+                exit(0);
+                
             }
-            default://if client type illegal point in main menu
+            default: //if client type illegal point in main menu
             {
                 SendErrorToClient(socket);
             }
         }
         memset(buf, 0, BUF_SIZE);
     }
-    //Disconnect client
-    printf("Disconnect client");
-    printf("\n");
-    threads--;
-    ExitThread(NULL);
 }
 
 void LotDetail(int lot, int socket, char* out) {
@@ -417,17 +477,15 @@ int DeleteClient(char name[]) {
     int number;
     number = FindNumberByName(name);
     if (number != -1) {
-        if (users[number].manager == true)
+        if (users[number].manager)
             manager_count = false;
 
         SendToClient(users[number].s1, "#");
-        printf("The client %s was deleted \n", users[number].login);
+        printf("\n The client %s was deleted \n", users[number].login);
         if (number != threads) {
             users[number] = users[threads];
             memset(&users[threads], NULL, sizeof (users[threads]));
         }
-        threads--;
-
         return 0;
     }
     return 1;
@@ -451,7 +509,7 @@ void WhoIsOnline(char* out) {
     }
 }
 
-char *SetPrice(int lot, char buf[]) {
+char *SetPrice(int lot, char buf[], int socket) {
     int price = -1;
     price = atoi(buf);
     if (price <= 0) {
@@ -462,6 +520,9 @@ char *SetPrice(int lot, char buf[]) {
     } else {
         printf("last_price=%d\n", price);
         lots[lot].price = price;
+        char* winner =  FindNameBySocket(socket);
+        memset(lots[lot].winner, 0, BUF_SIZE);
+        strncpy(lots[lot].winner, winner, strlen(winner));
         return "All right!\n";
     }
 
@@ -475,11 +536,11 @@ char *FindNameBySocket(int socket) {
     return "error";
 }
 
-void SentErrServer(char *s) //error handling
+void SentErrServer(char *s, int socket) //error handling
 {
     perror(s);
-    EndTrade();
-    exit(1);
+    DeleteClient(FindNameBySocket(socket));
+
 }
 
 void NewLot(char name[], char price[], int socket) {
@@ -489,9 +550,11 @@ void NewLot(char name[], char price[], int socket) {
         SendToClient(socket, "Invalid data \n");
         return;
     }
-    strcpy(lots[lotCount + 1].lotName, name);
+    strncpy(lots[lotCount + 1].lotName, name, strlen(name));
     lots[lotCount + 1].price = newPrice;
-    strcpy(lots[lotCount + 1].winner, FindNameBySocket(socket));
+    char* winner =  FindNameBySocket(socket);
+    strncpy(lots[lotCount + 1].winner, winner, strlen(winner));
+    printf("\n New lot %s created by %s with price %d \n", name, winner, newPrice);
     lotCount++;
 }
 
@@ -525,7 +588,7 @@ void SendResults() {
                 strcat(result, out_loser);
             }
         }
-        SendToClient((int) users[i].s1, result);
+        SendToClient( users[i].s1, result);
     }
 }
 
@@ -535,7 +598,6 @@ void EndTrade() {
         close(users[i].s1);
     }
     close(servSocket);
-    WSACleanup();
-    exit(0);
+	WSACleanup();
 
 }

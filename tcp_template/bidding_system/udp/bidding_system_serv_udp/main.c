@@ -13,46 +13,45 @@
 
 #define PORT 5001 
 #define BUF_SIZE 1000
-#define MAIN_MENU "Hello!\nWhat do you want?\n 1.See lot titles\n 2.New lot *only for manager*\n 3.See online users\n 4.Exit\n 5.End *only for manager*"
+#define MAIN_MENU "Hello!\nWhat do you want?\n 1.See lot titles\n 2.New lot *only for manager*\n 3.See online users (not for udp, lol)\n 4.Exit\n 5.End *only for manager*"
 #define WELCOME "Please type who are you: (login your_login)"
 #define LOTS "If you want to make a bet enter new bet, which will be higher than older ('bet lot_name lot_price')\n"
 #define NEW_LOT "Please write name and price of the new lot ('lot lot_name lot_price')\n"
 #define SUCCESS "The new lot has created!\n"
+#define DENIED "You are not a manager\n"
+#define NOTLOGIN "You must login before this action\n"
 #define COMMAND_COUNT 10
 
 
 void *ClientHandler(void* arg); //Client handler
 void ServerHandler(); //Server handler
-void SendErrorToClient(struct sockaddr_in cli_addr); // Send error to client
+void SendErrorToClient(struct sockaddr_in cli_addr, unsigned int clilen); // Send error to client
 void SentErrServer(char *s); //error handling
-void NewLot(char name[], char price[], struct sockaddr_in cli_addr); //make new lot
-int DeleteClient(char name[]); //Delete client
+void NewLot(char name[], char price[], int userNumber); //make new lot
 int FindNumberByName(char* name); //Find number of thread by Name
-char *FindNameByIp(struct sockaddr_in cli_addr); //Find name of client by socket
 void WhoIsOnline(char* out); //Make list of online users
-char *SetPrice(int lot, char buf[]); //Set price for lot and make status message
-void SendToClient(char* message, struct sockaddr_in cli_addr); //Send message to client
+char *SetPrice(int lot, char buf[], int userNumber); //Set price for lot and make status message
+void SendToClient(char* message, struct sockaddr_in cli_addr, unsigned int clilen); //Send message to client
 void SendResults(); //Send results to all users
 void EndTrade(); //Delete all users
 int FindTitle(char title[]);
 void LotDetail(int lot, char* out);
-
+int id = 0;
 int usersCount = -1; //users counter
 int lotCount = -1;
 bool manager_count = false; // if manager online
 
-//Command list
-char kill_command[] = "kill";
-char online_command[] = "online\n";
 char shutdown_command[] = "shutdown\n";
 
 struct clients {
     char login[BUF_SIZE];
     struct sockaddr_in cli_addr;
     bool manager; // if client is manager
+    unsigned int clilen;
 } *users;
 
 struct lot {
+
     char lotName[BUF_SIZE];
     int price;
     char winner[BUF_SIZE];
@@ -96,7 +95,7 @@ int main(void) {
     //Initialization
     struct sockaddr_in local;
     int rc;
-
+    
     //fill local
     local.sin_family = AF_INET;
     local.sin_port = htons(PORT);
@@ -121,41 +120,19 @@ int main(void) {
     //thread for server
     pthread_t client_thread;
     pthread_create(&client_thread, &threadAttr, ClientHandler, (void*) NULL);
-    
+
     ServerHandler();
     return 0;
 }
 
 void ServerHandler() {
-    char text[40]; //buffer
+  
     //Getting text from keyboard
     while (1) {
-
-        bzero(text, BUF_SIZE + 1);
+        char text[40]; //buffer
         fgets(text, BUF_SIZE, stdin);
 
         char buf[4];
-        strncat(buf, text, 4);
-        if (!strcmp(kill_command, buf)) {
-            char name[] = "";
-            int i = 5;
-            while ((text[i] != NULL) && (text[i] != '\n')) {
-                name[i] = text[i];
-                i++;
-            }
-            if (!DeleteClient(name))
-                printf("All right \n");
-            else
-                printf("Bad command\n");
-        }
-
-        if (!strcmp(online_command, text)) {
-            char out[BUF_SIZE] = "";
-            WhoIsOnline(out);
-            printf(out);
-        }
-
-
         if (!strcmp(shutdown_command, text)) {
             EndTrade();
             exit(1);
@@ -163,180 +140,213 @@ void ServerHandler() {
     }
 }
 
-void SendToClient(char* message, struct sockaddr_in cli_addr) {
+void SendToClient(char* message, struct sockaddr_in cli_addr, unsigned int clilen) {
     int rc;
-    rc = sendto(servSocket, message, BUF_SIZE, 0, (struct sockaddr*) &cli_addr, sizeof(cli_addr));
+    rc = sendto(servSocket, message, BUF_SIZE, 0, (struct sockaddr*) &cli_addr, clilen);
     if (rc <= 0)
         perror("send call failed");
 }
 
+
+
+
 void *ClientHandler(void* arg) {
 
-    int rc;  
-    bool isManager = false;
+    int rc;
 
     //Working 
     while (1) {
         char buf[ BUF_SIZE ]; //Buffer
         char pick[5] = "";
         struct sockaddr_in cli_addr;
-        rc = recvfrom (servSocket, buf, BUF_SIZE, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+        unsigned int clilen;
+        clilen = sizeof (cli_addr);
+        rc = recvfrom(servSocket, buf, BUF_SIZE, 0, (struct sockaddr *) &cli_addr, &clilen);
         if (rc <= 0)
             SentErrServer("Recv call failed");
         int position = 0;
-        while ((buf[position] != ' ') && (buf[position] != '\n') && (buf[position] != NULL) && (position != 5))
-        {
+        while ((buf[position] != ' ') && (buf[position] != '\n') && (buf[position] != NULL) && (position != 5)) {
             pick[position] = buf[position];
             position++;
         }
         int command = 0;
-        while (command <= COMMAND_COUNT)
-        {
+        while (command <= COMMAND_COUNT) {
             if (!strcmp(commands[command], pick))
                 break;
             command++;
         }
-       
-        position++; // to step over 
+
+        position++; // to step over
+        int userNumber = buf[strlen(buf)-1]-48;
+        
         switch (command) {
-            case 0 : // new
+            case 0: // new
             {
-                SendToClient(WELCOME, cli_addr);
+                char text[3] = "";
+                sprintf(text, "id%d", id);
+                SendToClient(text, cli_addr, clilen);
+                SendToClient(WELCOME, cli_addr, clilen);
+                id++;
+
                 break;
             }
-            case 1 : // login
+            case 1: // login
             {
                 usersCount++;
                 int i = position;
                 char name[BUF_SIZE] = "";
                 while ((buf[i] != NULL) && (buf[i] != '\n')) {
-                    name[i-position]=buf[i];
+                    name[i - position] = buf[i];
                     i++;
-                }
-                
-                //check for manager
-                if (!strcmp(name, "manager")) {
-                    isManager = true;
                 }
 
                 //delete if manager already exist  
-                if (isManager == true) {
+                if (!strcmp(name, "manager")) {
                     if (manager_count == true) {
                         printf("Client was Deleted. Manager already exist\n");
-                        SendToClient("#Manager already exist", cli_addr);
+                        SendToClient("#Manager already exist", cli_addr, clilen);
                         usersCount--;
+                    }
+                    else {
+                    users[usersCount].manager = true;
+                    manager_count = true;
                     }
                 }
 
-                //saving login
-                if (isManager) {
-                    users[usersCount].manager = true;
-                    manager_count = true;
-                }
-              
+
                 strcpy(users[usersCount].login, name);
-                SendToClient(MAIN_MENU, cli_addr);
+                SendToClient(MAIN_MENU, cli_addr, clilen);
                 printf("New user login is: %s\n", users[usersCount].login);
                 printf("\n");
                 users[usersCount].cli_addr = cli_addr;
+                users[usersCount].clilen = clilen;
                 break;
 
             }
             case 2: //Menu
             {
-                SendToClient(MAIN_MENU, cli_addr);
+                SendToClient(MAIN_MENU, cli_addr, clilen);
                 break;
             }
             case 3: //See lot titles
             {
+                if (strlen(users[userNumber].login) == 0)
+                {
+                    SendToClient(NOTLOGIN, cli_addr, clilen);
+                    break;
+                }
+
                 char out[BUF_SIZE] = LOTS;
                 for (int i = 0; i <= lotCount; i++) {
                     LotDetail(i, out);
                     strncat(out, "\n", 1);
                 }
-                SendToClient(out, cli_addr); //send lot names
+                SendToClient(out, cli_addr, clilen); //send lot names
                 break;
-                
-            }                 
+
+            }
             case 4: // bet lot_name lot_price
             {
+                 if (strlen(users[userNumber].login) == 0)
+                {
+                    SendToClient(NOTLOGIN, cli_addr, clilen);
+                    break;
+                }
                 int i = position;
                 char name[BUF_SIZE] = "";
                 char price[BUF_SIZE] = "";
-                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
-                {
-                    name[i-position] = buf[i]; 
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n')) {
+                    name[i - position] = buf[i];
                     i++;
                 }
                 i++;
                 int j = 0;
-                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
-                {
-                    price[j] = buf[i]; 
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n')) {
+                    price[j] = buf[i];
                     i++;
                     j++;
                 }
                 int lot = FindTitle(name);
                 if (lot == -1) {
-                    SendToClient("No lot with this name \n", cli_addr);
-                    SendToClient(MAIN_MENU, cli_addr);
+                    SendToClient("No lot with this name \n", cli_addr, clilen);
+                    SendToClient(MAIN_MENU, cli_addr, clilen);
                     break;
                 }
-                SendToClient(SetPrice(lot, price), cli_addr);
-                SendToClient(MAIN_MENU, cli_addr);
+                SendToClient(SetPrice(lot, price, userNumber), cli_addr, clilen);
+                SendToClient(MAIN_MENU, cli_addr, clilen);
                 break;
             }
             case 5://New lot
             {
-                if (isManager == false) {
+                if (strlen(users[userNumber].login) == 0)
+                {
+                    SendToClient(NOTLOGIN, cli_addr, clilen);
+                    break;
+                }
+                if (users[userNumber].manager == false) {
+                    SendToClient(DENIED, cli_addr, clilen);
                     break;
                 }
 
-                SendToClient(NEW_LOT, cli_addr);
+                SendToClient(NEW_LOT, cli_addr, clilen);
                 break;
             }
             case 6:
             {
+                if (strlen(users[userNumber].login) == 0)
+                {
+                    SendToClient(NOTLOGIN, cli_addr, clilen);
+                    break;
+                }
+                if (users[userNumber].manager == false) {
+                    SendToClient(DENIED, cli_addr, clilen);
+                    break;
+                }
                 int i = position;
                 char name[BUF_SIZE] = "";
                 char price[BUF_SIZE] = "";
-                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
-                {
-                    name[i-position] = buf[i]; 
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n')) {
+                    name[i - position] = buf[i];
                     i++;
                 }
                 i++;
                 int j = 0;
-                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n'))
-                {
-                    price[j] = buf[i]; 
+                while ((buf[i] != NULL) && (buf[i] != ' ') && (buf[i] != '\n')) {
+                    price[j] = buf[i];
                     i++;
                     j++;
                 }
-                
-                NewLot(name, price, cli_addr);
-                SendToClient(SUCCESS, cli_addr);
-                SendToClient(MAIN_MENU, cli_addr);
-                break; 
+
+                NewLot(name, price, userNumber);
+                SendToClient(SUCCESS, cli_addr, clilen);
+                SendToClient(MAIN_MENU, cli_addr, clilen);
+                break;
             }
             case 7://see online users
             {
-                char out[BUF_SIZE] = " ";
-                WhoIsOnline(out);
-                SendToClient(out, cli_addr);
-                SendToClient(MAIN_MENU, cli_addr);
+                /*
+                                char out[BUF_SIZE] = " ";
+                                WhoIsOnline(out);
+                                SendToClient(out, cli_addr);
+                                SendToClient(MAIN_MENU, cli_addr);
+                 */
                 break;
             }
             case 8://Disconnect client
             {
-                if (isManager == true)
+                if (users[userNumber].manager == true)
                     manager_count = false;
-                SendToClient("#", cli_addr);
-                DeleteClient(FindNameByIp(cli_addr));
+                SendToClient("#", cli_addr, clilen);
             }
             case 9://See result
             {
-                if (isManager == false) {
+                if (strlen(users[userNumber].login) == 0)
+                {
+                    SendToClient(NOTLOGIN, cli_addr, clilen);
+                    break;
+                }
+                if (users[userNumber].manager == false) {
+                    SendToClient(DENIED, cli_addr, clilen);
                     break;
                 }
                 SendResults();
@@ -344,7 +354,7 @@ void *ClientHandler(void* arg) {
             }
             default://if client type illegal point in main menu
             {
-                SendErrorToClient(cli_addr);
+                SendErrorToClient(cli_addr, clilen);
             }
         }
         memset(buf, 0, BUF_SIZE);
@@ -370,32 +380,11 @@ int FindTitle(char title[]) {
     return -1;
 }
 
-void SendErrorToClient(struct sockaddr_in cli_addr) {
+void SendErrorToClient(struct sockaddr_in cli_addr, unsigned int clilen) {
     int rc = 0;
-    rc = sendto(servSocket, "^", BUF_SIZE, 0, (struct sockaddr*) &cli_addr, sizeof(cli_addr));
+    rc = sendto(servSocket, "^", BUF_SIZE, 0, (struct sockaddr*) &cli_addr, clilen);
     if (rc <= 0)
         perror("send call failed");
-}
-
-int DeleteClient(char name[]) {
-    printf("DeleteClient running...\n");
-    int number;
-    number = FindNumberByName(name);
-    if (number != -1) {
-        if (users[number].manager == true)
-            manager_count = false;
-
-        SendToClient("#",users[number].cli_addr);
-        printf("The client %s was deleted \n", users[number].login);
-        if (number != usersCount) {
-            users[number] = users[usersCount];
-            memset(&users[usersCount], NULL, sizeof (users[usersCount]));
-        }
-        usersCount--;
-
-        return 0;
-    }
-    return 1;
 }
 
 int FindNumberByName(char* name) {
@@ -416,7 +405,7 @@ void WhoIsOnline(char* out) {
     }
 }
 
-char *SetPrice(int lot, char buf[]) {
+char *SetPrice(int lot, char buf[], int userNumber) {
     int price = -1;
     price = atoi(buf);
     if (price <= 0) {
@@ -427,17 +416,12 @@ char *SetPrice(int lot, char buf[]) {
     } else {
         printf("last_price=%d\n", price);
         lots[lot].price = price;
+        char* winner = users[userNumber].login;
+        memset(lots[lot].winner, 0, BUF_SIZE);
+        strncpy(lots[lot].winner, winner, strlen(winner));
         return "All right!\n";
     }
 
-}
-
-char *FindNameByIp(struct sockaddr_in cli_addr) {
-    for (int i = 0; i <= usersCount; i++) {
-        if (users[i].cli_addr.sin_addr.s_addr == cli_addr.sin_addr.s_addr)
-            return users[i].login;
-    }
-    return "error";
 }
 
 void SentErrServer(char *s) //error handling
@@ -447,16 +431,16 @@ void SentErrServer(char *s) //error handling
     exit(1);
 }
 
-void NewLot(char name[], char price[], struct sockaddr_in cli_addr) {
+void NewLot(char name[], char price[], int userNumber) {
     int newPrice = -1;
     newPrice = atoi(price);
     if (newPrice <= 0 || strlen(name) <= 0) {
-        SendToClient("Invalid data \n", cli_addr);
+        SendToClient("Invalid data \n", users[userNumber].cli_addr, users[userNumber].clilen);
         return;
     }
     strcpy(lots[lotCount + 1].lotName, name);
     lots[lotCount + 1].price = newPrice;
-    strcpy(lots[lotCount + 1].winner, FindNameByIp(cli_addr));
+    strcpy(lots[lotCount + 1].winner, users[userNumber].login);
     lotCount++;
 }
 
@@ -490,7 +474,7 @@ void SendResults() {
                 strcat(result, out_loser);
             }
         }
-        SendToClient(result, users[i].cli_addr);
+        SendToClient(result, users[i].cli_addr, users[i].clilen);
     }
 }
 
